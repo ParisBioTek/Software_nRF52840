@@ -1,0 +1,43 @@
+/dts-v1/;
+
+#include <nordic/nrf52840_qiaa.dtsi>
+#include "NRF52840_CUSTOM-pinctrl.dtsi"
+
+/ {
+	model = "PBT custom board";
+	compatible = "PBT,NRF52840-CUSTOM";
+
+	chosen {
+		zephyr,sram = &sram0;
+		zephyr,flash = &flash0;
+		zephyr,code-partition = &slot0_partition;
+	};
+};
+
+&flash0 {
+	partitions {
+		compatible = "fixed-partitions";
+		#address-cells = <1>;
+		#size-cells = <1>;
+
+		boot_partition: partition@0 {
+			label = "mcuboot";
+			reg = <0x0 DT_SIZE_K(80)>;
+		};
+
+		slot0_partition: partition@14000 {
+			label = "image-0";
+			reg = <0x14000 DT_SIZE_K(456)>;
+		};
+
+		slot1_partition: partition@86000 {
+			label = "image-1";
+			reg = <0x86000 DT_SIZE_K(456)>;
+		};
+
+		storage_partition: partition@f8000 {
+			label = "storage";
+			reg = <0xf8000 DT_SIZE_K(32)>;
+		};
+	};
+};

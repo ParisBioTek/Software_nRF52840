@@ -1,0 +1,10 @@
+identifier: NRF52840_CUSTOM/nrf52840
+name: PBT custom board
+vendor: PBT
+type: mcu
+arch: arm
+ram: 256
+flash: 472
+toolchain:
+  - zephyr
+supported: []

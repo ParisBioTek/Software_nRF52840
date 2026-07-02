@@ -1,0 +1,30 @@
+# ─────────────────────────── OS / éditeurs ───────────────────────────
+.DS_Store
+Thumbs.db
+.vscode/
+.idea/
+*.swp
+
+# ─────────────────────── Zephyr / nRF Connect SDK ────────────────────
+# Répertoires de build west (build, build_1, build_2, …) — à tout niveau
+build/
+build_*/
+twister-out/
+twister-out_*/
+# Workspace west local éventuel
+.west/
+
+# ─────────────────────────────── Python ──────────────────────────────
+__pycache__/
+*.py[cod]
+*.egg-info/
+.venv/
+venv/
+env/
+.pytest_cache/
+
+# ──────────────────── Données de mesure (générées) ───────────────────
+mesures/
+
+# ──────────────────────────────── Divers ─────────────────────────────
+*.log

@@ -1,0 +1,6 @@
+board:
+  name: NRF52840_CUSTOM
+  full_name: NRF52840_CUSTOM
+  vendor: PBT
+  socs:
+    - name: nrf52840

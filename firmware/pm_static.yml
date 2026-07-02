@@ -1,0 +1,15 @@
+mcuboot:
+  address: 0x00000000
+  size: 0x14000
+
+app:
+  address: 0x00014000
+  size: 0x72000
+
+mcuboot_secondary:
+  address: 0x00086000
+  size: 0x72000
+
+settings_storage:
+  address: 0x000f8000
+  size: 0x8000

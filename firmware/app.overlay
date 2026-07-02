@@ -1,0 +1,95 @@
+#include <dt-bindings/adc/nrf-adc.h>
+
+/ {
+    chosen {
+        zephyr,uart-mcumgr = &cdc_acm_uart0;
+        zephyr,console     = &cdc_acm_uart0;
+    };
+
+    /*
+     * GPIO P0.08 : contrôle de l'oscillateur 32 MHz externe (XC_1).
+     * HIGH = cristal actif   LOW = cristal éteint (économie d'énergie).
+     * Référencé via l'alias "hfxo-enable" dans power_manager.c.
+     */
+    leds {
+        compatible = "gpio-leds";
+        hfxo_en: hfxo_en {
+            gpios = <&gpio0 8 GPIO_ACTIVE_HIGH>;
+        };
+        /* AD5940 : CS P0.17 (actif bas), RST P0.20 (actif bas), alim P1.00 */
+        ad5940_cs: ad5940_cs {
+            gpios = <&gpio0 17 GPIO_ACTIVE_LOW>;
+        };
+        ad5940_rst: ad5940_rst {
+            gpios = <&gpio0 20 GPIO_ACTIVE_LOW>;
+        };
+        sensor_pwr: sensor_pwr {
+            gpios = <&gpio1 0 GPIO_ACTIVE_HIGH>;
+        };
+    };
+
+    aliases {
+        hfxo-enable  = &hfxo_en;
+        ad5940-cs    = &ad5940_cs;
+        ad5940-rst   = &ad5940_rst;
+        sensor-power = &sensor_pwr;
+    };
+
+    /*
+     * Canal ADC pour lecture tension VBUS.
+     * Utilise VDDHDIV5 (entrée interne nRF52840 = VBUS/5) — aucun pin requis.
+     */
+    zephyr,user {
+        io-channels = <&adc 0>;
+    };
+};
+
+/* Canal SAADC 0 : AIN0 / P0.02 */
+&adc {
+    status = "okay";
+    #address-cells = <1>;
+    #size-cells = <0>;
+
+    channel@0 {
+        reg = <0>;
+        zephyr,gain             = "ADC_GAIN_1_6";
+        zephyr,reference        = "ADC_REF_INTERNAL";
+        zephyr,acquisition-time = <ADC_ACQ_TIME_DEFAULT>;
+        zephyr,input-positive   = <NRF_SAADC_VDDHDIV5>; /* VBUS/5 interne — aucun pin requis */
+        zephyr,resolution       = <12>;
+    };
+};
+
+&zephyr_udc0 {
+    /* Port unique : console / logs / CSV CV / DFU mcumgr. */
+    cdc_acm_uart0: cdc_acm_uart0 {
+        compatible = "zephyr,cdc-acm-uart";
+    };
+};
+
+/* ── SPI1 : AD5940 ──────────────────────────────────────────────────────── */
+/* SCLK=P0.13  MOSI=P0.22  MISO=P0.15  CS=P0.17 (GPIO manuel, actif bas) */
+&pinctrl {
+    spi1_default: spi1_default {
+        group1 {
+            psels = <NRF_PSEL(SPIM_SCK,  0, 13)>,
+                    <NRF_PSEL(SPIM_MOSI, 0, 22)>,
+                    <NRF_PSEL(SPIM_MISO, 0, 15)>;
+        };
+    };
+    spi1_sleep: spi1_sleep {
+        group1 {
+            psels = <NRF_PSEL(SPIM_SCK,  0, 13)>,
+                    <NRF_PSEL(SPIM_MOSI, 0, 22)>,
+                    <NRF_PSEL(SPIM_MISO, 0, 15)>;
+            low-power-enable;
+        };
+    };
+};
+
+&spi1 {
+    status = "okay";
+    pinctrl-0 = <&spi1_default>;
+    pinctrl-1 = <&spi1_sleep>;
+    pinctrl-names = "default", "sleep";
+};
