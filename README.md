@@ -60,6 +60,12 @@ firmware/                     ← this folder (NCS/Zephyr project, sysbuild + MC
  
 CV_python/                    ← PC tool (sibling folder)
 └── main.py                   ← control / plot / export GUI
+
+Hardware/                    ← PCBs
+└── Altium_SensUs2026_ParisBioTek_PCBs.zip
+└── ProjPrj_SensUs2026_ParisBioTek_PCBs.epro
+└── README.md
+
 ```
  
 ---
@@ -282,6 +288,12 @@ firmware/                     ← ce dossier (projet NCS/Zephyr, sysbuild + MCUb
 
 CV_python/                    ← outil PC (dossier voisin)
 └── main.py                   ← GUI de pilotage / tracé / export
+
+Hardware/                    ← PCBs
+└── Altium_SensUs2026_ParisBioTek_PCBs.zip
+└── ProjPrj_SensUs2026_ParisBioTek_PCBs.epro
+└── README.md
+
 ```
 
 ---
