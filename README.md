@@ -72,7 +72,10 @@ CV_python/                    ← PC tool (sibling folder)
 | Sensor        | **AD5940** (potentiostat) on **SPI1**, mode 0                       |
 | Programming   | **J-Link** (VCOM/RTT) *or* **USB DFU** (mcumgr over the native CDC) |
 | Electrodes    | CE0 (counter electrode), RE0 (reference), SE0 (working)             |
- 
+
+PCBs can be found here : [https://oshwlab.com/anonymousse_1/project_ztutahwx](https://oshwlab.com/anonymousse_1/project_ztutahwx)
+They were designed using EasyEDA Pro and built by JLCPCB.
+
 SPI wiring (see `app.overlay`): `SCLK=P0.13  MOSI=P0.22  MISO=P0.15  CS=P0.17`,
 reset `P0.20`, sensor power `P1.00`.
  
@@ -291,6 +294,9 @@ CV_python/                    ← outil PC (dossier voisin)
 | Capteur            | **AD5940** (potentiostat) sur **SPI1**, mode 0                      |
 | Programmation      | **J-Link** (VCOM/RTT) *ou* **USB DFU** (mcumgr sur le CDC natif)    |
 | Électrodes         | CE0 (contre-électrode), RE0 (référence), SE0 (travail)             |
+
+PCBs détaillés ici : [https://oshwlab.com/anonymousse_1/project_ztutahwx](https://oshwlab.com/anonymousse_1/project_ztutahwx)
+Design réalisé avec EasyEDA Pro et produit par JLCPCB.
 
 Câblage SPI (voir `app.overlay`) : `SCLK=P0.13  MOSI=P0.22  MISO=P0.15  CS=P0.17`,
 reset `P0.20`, alim capteur `P1.00`.
