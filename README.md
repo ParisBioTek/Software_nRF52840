@@ -9,7 +9,7 @@ them over USB — **on the same channel as the firmware update (DFU)**.
  
 > This repo covers the **firmware** and the **PC tool**. The companion Android app
 > (NFC + BLE authentication) is not needed to develop here.
-> PCBs deigned with EasyEDA Pro available here :
+> PCBs deigned with EasyEDA Pro available here : [https://oshwlab.com/anonymousse_1/project_ztutahwx](https://oshwlab.com/anonymousse_1/project_ztutahwx)
  
 ---
  
