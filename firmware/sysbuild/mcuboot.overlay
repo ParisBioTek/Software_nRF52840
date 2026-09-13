@@ -10,3 +10,16 @@
         compatible = "zephyr,cdc-acm-uart";
     };
 };
+
+/* MCUboot n'utilise que la flash interne et l'USB natif sur le PCB PBT. */
+&qspi  { status = "disabled"; };
+&mx25r64 { status = "disabled"; };
+&uart0 { status = "disabled"; };
+&i2c0  { status = "disabled"; };
+&pwm0  { status = "disabled"; };
+&spi3  { status = "disabled"; };
+&spi1  { status = "disabled"; };
+
+&gpio0 {
+    gpio-reserved-ranges = <0 2>, <9 2>;
+};

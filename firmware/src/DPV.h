@@ -3,6 +3,7 @@
 
 #include <stdint.h>
 #include "ad5940.h"
+#include "methods.h"
 #include "CV.h"          /* cv_point_cb_t (callback commun aux méthodes) */
 
 /* Voltampérométrie à impulsions différentielles (DPV) : escalier start→end par
@@ -23,8 +24,11 @@ void    DPV_SetPointCallback(cv_point_cb_t cb);
 void    DPV_GetParams(dpv_params_t *out);
 int     DPV_SetParams(const dpv_params_t *in);   /* 0 si OK, <0 si hors plage */
 
-/* Lance la DPV (bloquant). rtia_ohm = gamme (ohms, >0). 0 si OK. */
-int     DPV_Run(float lfosc_hz, uint32_t rtia_ohm);
+/* Lance la DPV (bloquant). rtia_ohm = gamme (ohms, >0).
+ * Retour : 0 si le run est complet, MEAS_RUN_STOPPED si l'utilisateur l'a
+ * interrompu, valeur négative en cas d'erreur technique. */
+int     DPV_Run(float lfosc_hz, uint32_t rtia_ohm,
+                measurement_stop_cb_t stop_cb);
 
 /* Pic de |ΔI| du dernier run (nA). */
 int32_t DPV_GetPeakCurrentNa(void);
