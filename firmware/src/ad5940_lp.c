@@ -1,5 +1,5 @@
 #include "ad5940_lp.h"
-#include "CV.h"          /* CV_RtiaSelNearest, CV_RCAL_OHM, CV_ADC_REF_MV, CV_ADC_PGA_GAIN */
+#include "CV.h"          /* CV_RtiaSelNearest, CV_RCAL_OHM, CV_ADC_REF_V, CV_ADC_PGA_GAIN */
 #include "RampTest.h"    /* DAC12BITVOLT_1LSB, DAC6BITVOLT_1LSB */
 
 #include <zephyr/logging/log.h>
@@ -7,13 +7,14 @@
 
 LOG_MODULE_REGISTER(ad5940_lp, LOG_LEVEL_INF);
 
-#define LP_ADC_REF_MV   CV_ADC_REF_MV
+#define LP_ADC_REF_V    CV_ADC_REF_V
 #define LP_PGA          CV_ADC_PGA_GAIN
 #define LP_RCAL_OHM     CV_RCAL_OHM
 
 static float    s_rtia_mag = 0.0f;      /* RTIA calibré (ohms)          */
 static uint32_t s_rtia_nom = 0;         /* RTIA nominal retenu (ohms)   */
 static uint32_t s_rtia_sel = LPTIARTIA_4K;
+static lp_potential_state_t s_potential;
 
 /* ── Config de référence (identique RampTest.c) ─────────────────────────── */
 static void lp_ref_cfg(void)
@@ -34,7 +35,7 @@ static void lp_ref_cfg(void)
     AD5940_REFCfgS(&aferef_cfg);
 }
 
-/* ── Boucle LP : LPTIA0 + LPDAC0 (identique RampTest.c) ─────────────────── */
+/* ── Boucle LP : LPTIA0 + LPDAC0 pour une ampérométrie DC ──────────────── */
 static void lp_loop_cfg(void)
 {
     LPLoopCfg_Type lploop_cfg;
@@ -46,7 +47,11 @@ static void lp_loop_cfg(void)
     lploop_cfg.LpAmpCfg.LpTiaRf     = LPTIARF_20K;
     lploop_cfg.LpAmpCfg.LpTiaRload  = LPTIARLOAD_SHORT;
     lploop_cfg.LpAmpCfg.LpTiaRtia   = s_rtia_sel;
-    lploop_cfg.LpAmpCfg.LpTiaSW     = LPTIASW(2) | LPTIASW(4) | LPTIASW(5);
+    /* AD5940, table "Normal dc current measurement" : 0x302c.
+     * L'ancienne topologie 0x0034 est celle d'une rampe/pulse et ne reliait
+     * pas correctement le potentiostat/TIA à la cellule maintenue en DC. */
+    lploop_cfg.LpAmpCfg.LpTiaSW     = LPTIASW(13) | LPTIASW(12) |
+                                        LPTIASW(5)  | LPTIASW(3)  | LPTIASW(2);
 
     lploop_cfg.LpDacCfg.LpdacSel      = LPDAC0;
     lploop_cfg.LpDacCfg.DacData12Bit  = 0x800;
@@ -140,20 +145,55 @@ int lp_setup(float lfosc_hz, uint32_t rtia_ohm)
     return 0;
 }
 
-void lp_set_potential_mv(float vzero_mv, float e_mv)
+int lp_validate_potential_mv(float vzero_mv, float e_mv)
 {
-    if (vzero_mv < 200.0f)  vzero_mv = 200.0f;
-    if (vzero_mv > 2400.0f) vzero_mv = 2400.0f;
+    if (!isfinite(vzero_mv) || !isfinite(e_mv)) return -1;
+    if (vzero_mv < 200.0f ||
+        vzero_mv > 200.0f + 63.0f * DAC6BITVOLT_1LSB) return -1;
 
     uint32_t VzeroCode = (uint32_t)((vzero_mv - 200.0f) / DAC6BITVOLT_1LSB + 0.5f);
-    if (VzeroCode > 63) VzeroCode = 63;
+    if (VzeroCode > 63) return -1;
 
     int32_t rampCode  = (int32_t)lroundf(e_mv / DAC12BITVOLT_1LSB);
     int32_t VbiasCode = (int32_t)(VzeroCode * 64) + rampCode;
-    if (VbiasCode < 0)    VbiasCode = 0;
-    if (VbiasCode > 4095) VbiasCode = 4095;
+    return (VbiasCode >= 0 && VbiasCode <= 4095) ? 0 : -1;
+}
 
-    AD5940_WriteReg(REG_AFE_LPDACDAT0, ((uint32_t)VzeroCode << 12) | (uint32_t)VbiasCode);
+int lp_set_potential_mv(float vzero_mv, float e_mv)
+{
+    s_potential.e_mv     = (int32_t)lroundf(e_mv);
+    s_potential.vzero_mv = (int32_t)lroundf(vzero_mv);
+    s_potential.valid    = 0;
+    s_potential.readback_ok = 0;
+    s_potential.dac_register = 0;
+
+    if (lp_validate_potential_mv(vzero_mv, e_mv) != 0) {
+        LOG_WRN("LPDAC refuse : Vzero=%d mV, E=%d mV", (int)vzero_mv, (int)e_mv);
+        return -1;
+    }
+
+    uint32_t VzeroCode = (uint32_t)((vzero_mv - 200.0f) / DAC6BITVOLT_1LSB + 0.5f);
+    int32_t VbiasCode = (int32_t)(VzeroCode * 64) +
+                        (int32_t)lroundf(e_mv / DAC12BITVOLT_1LSB);
+    uint32_t written = ((uint32_t)VzeroCode << 12) | (uint32_t)VbiasCode;
+
+    AD5940_WriteReg(REG_AFE_LPDACDAT0, written);
+    s_potential.vzero_code = (uint8_t)VzeroCode;
+    s_potential.vbias_code = (uint16_t)VbiasCode;
+    s_potential.dac_register = AD5940_ReadReg(REG_AFE_LPDACDAT0) & 0x3ffffu;
+    s_potential.valid = 1;
+    s_potential.readback_ok = (s_potential.dac_register == written) ? 1u : 0u;
+    if (!s_potential.readback_ok) {
+        LOG_WRN("LPDAC lecture incohérente : écrit=0x%05x lu=0x%05x",
+                (unsigned)written, (unsigned)s_potential.dac_register);
+        return -1;
+    }
+    return 0;
+}
+
+void lp_get_potential_state(lp_potential_state_t *out)
+{
+    if (out) *out = s_potential;
 }
 
 float lp_read_current_ua(void)
@@ -167,11 +207,18 @@ float lp_read_current_ua(void)
         AD5940_INTCClrFlag(AFEINTSRC_SINC2RDY);
         AD5940_AFECtrlS(AFECTRL_ADCCNV | AFECTRL_SINC2NOTCH, bTRUE);
 
-        uint32_t guard = 0;
-        while (AD5940_INTCTestFlag(AFEINTC_1, AFEINTSRC_SINC2RDY) == bFALSE) {
-            if (++guard > 400000u) {                /* garde-fou anti-blocage */
+        BoolFlag ready = bFALSE;
+        for (uint32_t guard = 0; guard < 2000u; guard++) { /* maximum ~20 ms */
+            if (AD5940_INTCTestFlag(AFEINTC_1, AFEINTSRC_SINC2RDY) != bFALSE) {
+                ready = bTRUE;
                 break;
             }
+            AD5940_Delay10us(1);
+        }
+        if (ready == bFALSE) {
+            AD5940_AFECtrlS(AFECTRL_ADCCNV | AFECTRL_SINC2NOTCH | AFECTRL_ADCPWR, bFALSE);
+            LOG_ERR("LP ADC : timeout SINC2RDY");
+            return NAN;
         }
         AD5940_INTCClrFlag(AFEINTSRC_SINC2RDY);
         code = AD5940_ReadAfeResult(AFERESULT_SINC2) & 0xFFFF;
@@ -179,8 +226,10 @@ float lp_read_current_ua(void)
     }
 
     /* Même conversion que RampTest : courant en µA, RTIA calibré. */
-    float volt = -AD5940_ADCCode2Volt(code, LP_PGA, LP_ADC_REF_MV);
-    return volt / s_rtia_mag * 1e3f;
+    if (!(s_rtia_mag > 0.0f)) return NAN;
+    float volt = -AD5940_ADCCode2Volt(code, LP_PGA, LP_ADC_REF_V);
+    /* AD5940_ADCCode2Volt renvoie des volts : V / ohm = A, puis A -> µA. */
+    return volt / s_rtia_mag * 1e6f;
 }
 
 uint32_t lp_rtia_nominal_ohm(void)    { return s_rtia_nom; }

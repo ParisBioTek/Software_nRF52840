@@ -134,7 +134,10 @@ static AD5940Err AD5940_SEQGenSearchReg(uint32_t RegAddr, uint32_t *pIndex)
   uint32_t i;
 
   RegAddr = (RegAddr>>2)&0xff;
-  for(i=0;i<SeqGenDB.SeqLen;i++)
+  /* pRegInfo contains RegCount entries. SeqLen is the number of generated
+   * commands and can be much larger; using it here reads past the register
+   * database during CV sequence generation. */
+  for(i=0;i<SeqGenDB.RegCount;i++)
   {
     if(RegAddr == SeqGenDB.pRegInfo[i].RegAddr)
     {
@@ -2494,11 +2497,15 @@ AD5940Err AD5940_WUPTTime(uint32_t SeqId, uint32_t SleepTime, uint32_t WakeupTim
 /**
  * @brief Configure AD5940 clock
  * @param pClkCfg: Pointer to configuration structure.
- * @return return none.
-*/
-void AD5940_CLKCfg(CLKCfg_Type *pClkCfg)
+ * @return AD5940ERR_OK, or AD5940ERR_TIMEOUT if an oscillator never becomes ready.
+ */
+AD5940Err AD5940_CLKCfg(CLKCfg_Type *pClkCfg)
 {
   uint32_t tempreg, reg_osccon;
+  AD5940Err error;
+
+  if(pClkCfg == NULL)
+    return AD5940ERR_NULLP;
 
   reg_osccon = AD5940_ReadReg(REG_ALLON_OSCCON);
   /* Enable clocks */
@@ -2507,7 +2514,14 @@ void AD5940_CLKCfg(CLKCfg_Type *pClkCfg)
     reg_osccon |= BITM_ALLON_OSCCON_HFXTALEN;
     AD5940_WriteReg(REG_ALLON_OSCKEY,KEY_OSCCON); /* Write Key */
     AD5940_WriteReg(REG_ALLON_OSCCON, reg_osccon); /* Enable HFXTAL */
-    while((AD5940_ReadReg(REG_ALLON_OSCCON)&BITM_ALLON_OSCCON_HFXTALOK) == 0); /* Wait for clock ready */
+    for(uint32_t guard = 0; ; guard++)
+    {
+      if((AD5940_ReadReg(REG_ALLON_OSCCON)&BITM_ALLON_OSCCON_HFXTALOK) != 0)
+        break;
+      if(guard >= 10000u)
+        return AD5940ERR_TIMEOUT;
+      AD5940_Delay10us(1);
+    }
   }
 
   if(pClkCfg->HFOSCEn == bTRUE)
@@ -2515,12 +2529,21 @@ void AD5940_CLKCfg(CLKCfg_Type *pClkCfg)
     reg_osccon |= BITM_ALLON_OSCCON_HFOSCEN;
     AD5940_WriteReg(REG_ALLON_OSCKEY,KEY_OSCCON); /* Write Key */
     AD5940_WriteReg(REG_ALLON_OSCCON, reg_osccon); /* Enable HFOSC */
-    while((AD5940_ReadReg(REG_ALLON_OSCCON)&BITM_ALLON_OSCCON_HFOSCOK) == 0); /* Wait for clock ready */
+    for(uint32_t guard = 0; ; guard++)
+    {
+      if((AD5940_ReadReg(REG_ALLON_OSCCON)&BITM_ALLON_OSCCON_HFOSCOK) != 0)
+        break;
+      if(guard >= 10000u)
+        return AD5940ERR_TIMEOUT;
+      AD5940_Delay10us(1);
+    }
     /* Configure HFOSC mode if it's enabled. */
     if(pClkCfg->HfOSC32MHzMode  == bTRUE)
-      AD5940_HFOSC32MHzCtrl(bTRUE);
+      error = AD5940_HFOSC32MHzCtrl(bTRUE);
     else
-      AD5940_HFOSC32MHzCtrl(bFALSE);
+      error = AD5940_HFOSC32MHzCtrl(bFALSE);
+    if(error != AD5940ERR_OK)
+      return error;
   }
 
   if(pClkCfg->LFOSCEn == bTRUE)
@@ -2528,7 +2551,14 @@ void AD5940_CLKCfg(CLKCfg_Type *pClkCfg)
     reg_osccon |= BITM_ALLON_OSCCON_LFOSCEN;  
     AD5940_WriteReg(REG_ALLON_OSCKEY,KEY_OSCCON); /* Write Key */  
     AD5940_WriteReg(REG_ALLON_OSCCON, reg_osccon); /* Enable LFOSC */
-    while((AD5940_ReadReg(REG_ALLON_OSCCON)&BITM_ALLON_OSCCON_LFOSCOK) == 0); /* Wait for clock ready */
+    for(uint32_t guard = 0; ; guard++)
+    {
+      if((AD5940_ReadReg(REG_ALLON_OSCCON)&BITM_ALLON_OSCCON_LFOSCOK) != 0)
+        break;
+      if(guard >= 10000u)
+        return AD5940ERR_TIMEOUT;
+      AD5940_Delay10us(1);
+    }
   }
 
   /* Switch clocks */
@@ -2552,6 +2582,7 @@ void AD5940_CLKCfg(CLKCfg_Type *pClkCfg)
     reg_osccon &= ~BITM_ALLON_OSCCON_LFOSCEN;
   AD5940_WriteReg(REG_ALLON_OSCKEY, KEY_OSCCON); /* Write Key */
   AD5940_WriteReg(REG_ALLON_OSCCON, reg_osccon);
+  return AD5940ERR_OK;
 }
 
 /**
@@ -2559,9 +2590,9 @@ void AD5940_CLKCfg(CLKCfg_Type *pClkCfg)
  * @param Mode32MHz : {bTRUE, bFALSE}
  *        - bTRUE: HFOSC 32MHz mode.
  *        - bFALSE: HFOSC 16MHz mode.
- * @return return none.
-*/
-void AD5940_HFOSC32MHzCtrl(BoolFlag Mode32MHz)
+ * @return AD5940ERR_OK, or AD5940ERR_TIMEOUT if HFOSC never becomes ready.
+ */
+AD5940Err AD5940_HFOSC32MHzCtrl(BoolFlag Mode32MHz)
 {
   uint32_t RdCLKEN1;
   uint32_t RdHPOSCCON;   
@@ -2579,15 +2610,26 @@ void AD5940_HFOSC32MHzCtrl(BoolFlag Mode32MHz)
   if(Mode32MHz == bTRUE)
   {
     AD5940_WriteReg(REG_AFE_HPOSCCON,RdHPOSCCON&(~BITM_AFE_HPOSCCON_CLK32MHZEN)); /* Enable 32MHz output(bit definition-0: 32MHz, 1: 16MHz) */  
-    while((AD5940_ReadReg(REG_ALLON_OSCCON)&BITM_ALLON_OSCCON_HFOSCOK) == 0); /* Wait for clock ready */
   }
   else
   {
     AD5940_WriteReg(REG_AFE_HPOSCCON,RdHPOSCCON|BITM_AFE_HPOSCCON_CLK32MHZEN); /* Enable 16MHz output(bit definition-0: 32MHz, 1: 16MHz) */       
-    while((AD5940_ReadReg(REG_ALLON_OSCCON)&BITM_ALLON_OSCCON_HFOSCOK) == 0); /* Wait for clock ready */
+  }
+
+  for(uint32_t guard = 0; ; guard++)
+  {
+    if((AD5940_ReadReg(REG_ALLON_OSCCON)&BITM_ALLON_OSCCON_HFOSCOK) != 0)
+      break;
+    if(guard >= 10000u)
+    {
+      AD5940_WriteReg(REG_AFECON_CLKEN1,RdCLKEN1&(~BITM_AFECON_CLKEN1_ACLKDIS));
+      return AD5940ERR_TIMEOUT;
+    }
+    AD5940_Delay10us(1);
   }
 
   AD5940_WriteReg(REG_AFECON_CLKEN1,RdCLKEN1&(~BITM_AFECON_CLKEN1_ACLKDIS)); /* Enable ACLK */
+  return AD5940ERR_OK;
 }
 /**
  * @brief Enable high power mode for high frequency EIS
@@ -2621,7 +2663,7 @@ void 			AD5940_HPModeEn(BoolFlag Enable)
     clk_cfg.HFOSCEn = (temp_reg & 0x3) == 0x1? bFALSE : bTRUE;;
 	clk_cfg.HFXTALEn = (temp_reg & 0x3) == 0x1? bTRUE : bFALSE;
     clk_cfg.LFOSCEn = bTRUE;
-    AD5940_CLKCfg(&clk_cfg);
+    (void)AD5940_CLKCfg(&clk_cfg);
 }
 
 /**
@@ -3630,6 +3672,7 @@ AD5940Err AD5940_HSRtiaCal(HSRTIACal_Type *pCalCfg, void *pResult)
 **/
 AD5940Err AD5940_LPRtiaCal(LPRTIACal_Type *pCalCfg, void *pResult)
 {
+  AD5940Err error = AD5940ERR_OK;
   HSLoopCfg_Type hs_loop;
   LPLoopCfg_Type lp_loop;
   DSPCfg_Type dsp_cfg;
@@ -3650,6 +3693,7 @@ AD5940Err AD5940_LPRtiaCal(LPRTIACal_Type *pCalCfg, void *pResult)
   float GainRatio;
 
   iImpCar_Type DftRcal, DftRtia;
+  uint32_t Guard;
 
   if(pCalCfg == NULL)  return AD5940ERR_NULLP;  /* Parameters illegal */
   
@@ -3878,8 +3922,18 @@ AD5940Err AD5940_LPRtiaCal(LPRTIACal_Type *pCalCfg, void *pResult)
     AD5940_AFECtrlS(AFECTRL_ADCPWR|AFECTRL_WG, bTRUE);
     AD5940_Delay10us(25);
     AD5940_AFECtrlS(AFECTRL_ADCCNV|AFECTRL_DFT, bTRUE);
-    /* Wait until DFT ready */
-    while(AD5940_INTCTestFlag(AFEINTC_1, AFEINTSRC_DFTRDY) == bFALSE);  
+    /* Wait until DFT ready, but never hang the host forever on an AFE/SPI
+     * fault. DFTNUM_2048 normally completes in a few hundred milliseconds. */
+    Guard = 0;
+    while(AD5940_INTCTestFlag(AFEINTC_1, AFEINTSRC_DFTRDY) == bFALSE)
+    {
+      if(++Guard > 100000u)
+      {
+        error = AD5940ERR_TIMEOUT;
+        goto LPRTIACAL_CLEANUP;
+      }
+      AD5940_Delay10us(1);
+    }
     AD5940_AFECtrlS(AFECTRL_ADCCNV|AFECTRL_DFT|AFECTRL_WG|AFECTRL_ADCPWR, bFALSE);  /* Stop ADC convert and DFT */
     AD5940_INTCClrFlag(AFEINTSRC_DFTRDY);
     DftRcal.Real = AD5940_ReadAfeResult(AFERESULT_DFTREAL);
@@ -3899,8 +3953,17 @@ AD5940Err AD5940_LPRtiaCal(LPRTIACal_Type *pCalCfg, void *pResult)
     AD5940_AFECtrlS(AFECTRL_ADCPWR|AFECTRL_WG, bTRUE);
     AD5940_Delay10us(25);
     AD5940_AFECtrlS(AFECTRL_ADCCNV|AFECTRL_DFT, bTRUE);
-    /* Wait until DFT ready */
-    while(AD5940_INTCTestFlag(AFEINTC_1, AFEINTSRC_DFTRDY) == bFALSE);  
+    /* Same bounded wait for the RTIA acquisition. */
+    Guard = 0;
+    while(AD5940_INTCTestFlag(AFEINTC_1, AFEINTSRC_DFTRDY) == bFALSE)
+    {
+      if(++Guard > 100000u)
+      {
+        error = AD5940ERR_TIMEOUT;
+        goto LPRTIACAL_CLEANUP;
+      }
+      AD5940_Delay10us(1);
+    }
     AD5940_AFECtrlS(AFECTRL_ADCCNV|AFECTRL_DFT|AFECTRL_WG|AFECTRL_ADCPWR, bFALSE);  /* Stop ADC convert and DFT */
     AD5940_INTCClrFlag(AFEINTSRC_DFTRDY);
     DftRtia.Real = AD5940_ReadAfeResult(AFERESULT_DFTREAL);
@@ -3937,6 +4000,12 @@ AD5940Err AD5940_LPRtiaCal(LPRTIACal_Type *pCalCfg, void *pResult)
     ((fImpPol_Type*)pResult)->Phase = AD5940_ComplexPhase(&res);
   }
     
+LPRTIACAL_CLEANUP:
+  /* Stop every block used by the AC calibration before restoring the caller's
+   * state. This path is shared by success and timeout. */
+  AD5940_AFECtrlS(AFECTRL_ADCCNV|AFECTRL_DFT|AFECTRL_WG|AFECTRL_ADCPWR,
+                  bFALSE);
+  AD5940_INTCClrFlag(AFEINTSRC_DFTRDY);
   /* Restore INTC1 DFT configure */
   if(INTCCfg&AFEINTSRC_DFTRDY);
   else
@@ -3952,7 +4021,7 @@ AD5940Err AD5940_LPRtiaCal(LPRTIACal_Type *pCalCfg, void *pResult)
   hs_loop.SWMatCfg.Tswitch = SWT_OPEN;
   AD5940_SWMatrixCfgS(&hs_loop.SWMatCfg);
   
-  return AD5940ERR_OK;
+  return error;
 }
 
 
@@ -4317,9 +4386,10 @@ AD5940Err AD5940_LFOSCMeasure(LFOSCMeasure_Type *pCfg, float *pFreq) /* Measure 
   uint32_t TimerCount, TimerCount2;
   SEQCfg_Type seq_cfg, seq_cfg_backup;
   SEQInfo_Type seqinfo;
-  WUPTCfg_Type wupt_cfg;
+  WUPTCfg_Type wupt_cfg = {0};
   uint32_t INTCCfg;
   uint32_t WuptPeriod;
+  uint32_t Guard;
 
   static const uint32_t SeqA[]=
   {
@@ -4383,7 +4453,15 @@ AD5940Err AD5940_LFOSCMeasure(LFOSCMeasure_Type *pCfg, float *pFreq) /* Measure 
   AD5940_INTCClrFlag(AFEINTSRC_ENDSEQ);
   AD5940_WUPTCtrl(bTRUE);
   
-  while(AD5940_INTCTestFlag(AFEINTC_1, AFEINTSRC_ENDSEQ) == bFALSE);
+  Guard = 0;
+  while(AD5940_INTCTestFlag(AFEINTC_1, AFEINTSRC_ENDSEQ) == bFALSE)
+  {
+    /* Ne jamais bloquer définitivement le firmware si le SPI ou le WUPT est
+     * perturbé pendant la calibration. CalDuration vaut normalement 1 s. */
+    if(++Guard > 30000u)
+      goto LFOSCMEASURE_TIMEOUT;
+    AD5940_Delay10us(1);
+  }
   TimerCount = AD5940_SEQTimeOutRd();
   
   AD5940_WUPTCtrl(bFALSE);
@@ -4398,7 +4476,13 @@ AD5940Err AD5940_LFOSCMeasure(LFOSCMeasure_Type *pCfg, float *pFreq) /* Measure 
 
   AD5940_INTCClrFlag(AFEINTSRC_ENDSEQ);
   AD5940_WUPTCtrl(bTRUE);
-  while(AD5940_INTCTestFlag(AFEINTC_1, AFEINTSRC_ENDSEQ) == bFALSE);
+  Guard = 0;
+  while(AD5940_INTCTestFlag(AFEINTC_1, AFEINTSRC_ENDSEQ) == bFALSE)
+  {
+    if(++Guard > 30000u)
+      goto LFOSCMEASURE_TIMEOUT;
+    AD5940_Delay10us(1);
+  }
   TimerCount2 = AD5940_SEQTimeOutRd();
 	AD5940_INTCTestFlag(AFEINTC_0, AFEINTSRC_ENDSEQ);
 
@@ -4407,8 +4491,18 @@ AD5940Err AD5940_LFOSCMeasure(LFOSCMeasure_Type *pCfg, float *pFreq) /* Measure 
   AD5940_INTCCfg(AFEINTC_1, AFEINTSRC_ENDSEQ, (INTCCfg&AFEINTSRC_ENDSEQ)?bTRUE:bFALSE); /* Restore interrupt configuration */
   AD5940_INTCClrFlag(AFEINTSRC_ENDSEQ);
   //printf("Time duration:%d ", (TimerCount2 - TimerCount));
+	if(TimerCount2 == TimerCount)
+    return AD5940ERR_ERROR;
 	*pFreq = pCfg->SystemClkFreq*WuptPeriod/(TimerCount2 - TimerCount);
   return AD5940ERR_OK;
+
+LFOSCMEASURE_TIMEOUT:
+  AD5940_WUPTCtrl(bFALSE);
+  AD5940_SEQCfg(&seq_cfg_backup);
+  AD5940_INTCCfg(AFEINTC_1, AFEINTSRC_ENDSEQ,
+                 (INTCCfg&AFEINTSRC_ENDSEQ)?bTRUE:bFALSE);
+  AD5940_INTCClrFlag(AFEINTSRC_ENDSEQ);
+  return AD5940ERR_TIMEOUT;
 }
 
 /**

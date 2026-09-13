@@ -1,0 +1,11 @@
+description: GPIO command lines owned directly by the ParisBioTek application
+
+compatible: "pbt,control-gpios"
+
+child-binding:
+  description: One application-owned GPIO command line
+
+  properties:
+    gpios:
+      type: phandle-array
+      required: true

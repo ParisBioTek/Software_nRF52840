@@ -3,6 +3,7 @@
 
 #include <stdint.h>
 #include "ad5940.h"
+#include "methods.h"
 
 /* ═══════════════════════════════════════════════════════════════════════════
    PARAMÈTRES UTILISATEUR
@@ -12,14 +13,21 @@
 #define CV_VZERO_MV              1300.0f
 
 #define CV_STEP_NUMBER            800
+#define CV_CYCLE_COUNT              1
 #define CV_DURATION_MS          24000
 #define CV_SAMPLE_DELAY_MS        7.0f
+#define CV_SETTLE_MS              2000u
+#define CV_SETTLE_MAX_MS         60000u
+
+/* Must stay in sync with the point-transfer buffer in main.c. */
+#define CV_MAX_TOTAL_POINTS       4000u
 
 #define CV_RTIA_SEL             LPTIARTIA_4K
 #define CV_ADC_PGA_GAIN         ADCPGA_1P5
 
 #define CV_RCAL_OHM             100.0f
-#define CV_ADC_REF_MV           1820.0f
+/* AD5940_ADCCode2Volt() attend des volts, pas des millivolts. */
+#define CV_ADC_REF_V              1.820f
 
 /* Forçage du RTIA en ohms : si > 0, la calibration RTIA est ignorée et cette
  * valeur est utilisée pour convertir le courant. À utiliser quand la
@@ -34,7 +42,10 @@
 
 AD5940Err CV_Init(float lfosc_hz);
 AD5940Err CV_Start(void);
-void      CV_Service(void);
+/* Retourne immédiatement toute erreur ISR/séquenceur afin que l'appelant ne
+ * transforme pas la cause initiale en simple timeout générique. */
+AD5940Err CV_Service(void);
+void      CV_Abort(void);
 int       CV_IsFinished(void);
 AD5940Err CV_Restart(void);
 
@@ -67,9 +78,11 @@ typedef struct {
     float    start_mv;        /* tension de départ du balayage (mV)        */
     float    peak_mv;         /* tension de sommet du balayage (mV)        */
     float    vzero_mv;        /* tension de polarisation Vzero (mV)        */
-    uint32_t step_number;     /* nombre de pas (pair, >= 2)                */
-    uint32_t duration_ms;     /* durée totale du cycle (ms)                */
+    uint32_t step_number;     /* nombre de pas PAR cycle (pair, >= 2)      */
+    uint32_t cycle_count;     /* nombre de cycles successifs (>= 1)        */
+    uint32_t duration_ms;     /* durée d'UN cycle (ms)                     */
     float    sample_delay_ms; /* délai d'échantillon par pas (ms)          */
+    uint32_t settle_ms;       /* maintien a start_mv avant le 1er point */
 } cv_params_t;
 
 /* Copie les paramètres courants (réglables) dans *out. */
@@ -81,8 +94,15 @@ void CV_GetParams(cv_params_t *out);
  * perturbé. */
 int CV_SetParams(const cv_params_t *in);
 
-/* Durée (ms) du cycle EN COURS (instantané pris au CV_Init), pour le timeout. */
+/* Durée totale (ms) du run EN COURS, tous cycles compris (instantané pris
+ * au CV_Init), pour le timeout. La stabilisation initiale n'est pas incluse. */
 uint32_t CV_GetActiveDurationMs(void);
+
+/* Geometry of the run currently prepared by CV_Init(). `step_number` remains
+ * the number of points in one elementary cycle. */
+uint32_t CV_GetActiveStepNumber(void);
+uint32_t CV_GetActiveCycleCount(void);
+uint32_t CV_GetActiveTotalPoints(void);
 
 /* ═══════════════════════════════════════════════════════════════════════════
    GAMME DE MESURE (RTIA) — réglable au runtime + autorange
@@ -115,6 +135,14 @@ uint32_t CV_RtiaSelNearest(uint32_t ohm, uint32_t *ohm_out);
 /* Sélection automatique de gamme : lance des balayages de sonde rapides pour
  * choisir le RTIA. À appeler après l'init AD5940 et AVANT le CV_Init du vrai
  * cycle. Ne fait rien si l'autorange n'est pas actif. */
-void CV_Autorange(float lfosc_hz);
+int CV_Autorange(float lfosc_hz, measurement_stop_cb_t stop_cb);
+
+/* Applique le potentiel initial directement au LPDAC apres CV_Init(), sans
+ * lancer le WUPT ni produire d'echantillon. L'appelant maintient ensuite ce
+ * potentiel pendant settle_ms avant CV_Start(). */
+AD5940Err CV_ApplyStartPotential(void);
+
+/* Stabilisation configuree pour le run fige par le dernier CV_Init(). */
+uint32_t CV_GetActiveSettleMs(void);
 
 #endif /* _CV_H_ */

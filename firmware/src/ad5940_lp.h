@@ -18,10 +18,25 @@
  * À appeler après ad5940_platform_init() (AD5940 réveillé, horloges prêtes). */
 int lp_setup(float lfosc_hz, uint32_t rtia_ohm);
 
+typedef struct {
+    int32_t  e_mv;
+    int32_t  vzero_mv;
+    uint16_t vbias_code;
+    uint8_t  vzero_code;
+    uint8_t  valid;
+    uint8_t  readback_ok;
+    uint32_t dac_register;
+} lp_potential_state_t;
+
+/* Vérifie qu'un potentiel peut être représenté sans écrêtage du LPDAC. */
+int lp_validate_potential_mv(float vzero_mv, float e_mv);
+
 /* Applique un potentiel de cellule e_mv (électrode de travail vs référence),
- * polarisé autour de vzero_mv. Écrit le registre LPDAC (12 bits Vbias / 6 bits
- * Vzero). L'appelant gère le délai d'établissement. */
-void lp_set_potential_mv(float vzero_mv, float e_mv);
+ * polarisé autour de vzero_mv. Renvoie 0 si le registre LPDAC a été écrit. */
+int lp_set_potential_mv(float vzero_mv, float e_mv);
+
+/* Dernière écriture LPDAC, avec lecture de contrôle du registre matériel. */
+void lp_get_potential_state(lp_potential_state_t *out);
 
 /* Une lecture de courant (µA) — même formule/échelle que la CV. */
 float lp_read_current_ua(void);

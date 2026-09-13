@@ -23,11 +23,12 @@ void CA_GetParams(ca_params_t *out) { if (out) *out = s_p; }
 int CA_SetParams(const ca_params_t *in)
 {
     if (!in) return -1;
+    if (!isfinite(in->pot_mv) || !isfinite(in->vzero_mv)) return -1;
     if (in->duration_ms < 100u  || in->duration_ms > 600000u) return -1;
     if (in->interval_ms < 5u    || in->interval_ms > 10000u)  return -1;
     if (in->interval_ms > in->duration_ms)                    return -1;
-    if (in->pot_mv   < -2000.0f || in->pot_mv   > 2000.0f)    return -1;
-    if (in->vzero_mv <   200.0f || in->vzero_mv > 2400.0f)    return -1;
+    if (in->duration_ms / in->interval_ms > CV_MAX_TOTAL_POINTS) return -1;
+    if (lp_validate_potential_mv(in->vzero_mv, in->pot_mv) != 0) return -1;
     s_p = *in;
     LOG_INF("CA params : E=%d mV  Vzero=%d mV  durée=%u ms  intervalle=%u ms",
             (int)s_p.pot_mv, (int)s_p.vzero_mv,
@@ -37,17 +38,44 @@ int CA_SetParams(const ca_params_t *in)
 
 int32_t CA_GetPeakCurrentNa(void) { return s_peak_na; }
 
-int CA_Run(float lfosc_hz, uint32_t rtia_ohm)
+static bool ca_wait_or_stop(uint32_t delay_ms, measurement_stop_cb_t stop_cb)
+{
+    while (delay_ms > 0u) {
+        if (stop_cb && stop_cb()) return true;
+        uint32_t slice_ms = (delay_ms > 20u) ? 20u : delay_ms;
+        k_sleep(K_MSEC(slice_ms));
+        delay_ms -= slice_ms;
+    }
+    return stop_cb && stop_cb();
+}
+
+int CA_Run(float lfosc_hz, uint32_t rtia_ohm,
+           measurement_stop_cb_t stop_cb)
 {
     ca_params_t p = s_p;
     s_peak_na = 0;
+
+    if (stop_cb && stop_cb()) {
+        return MEAS_RUN_STOPPED;
+    }
 
     if (lp_setup(lfosc_hz, rtia_ohm) != 0) {
         return -1;
     }
 
-    lp_set_potential_mv(p.vzero_mv, p.pot_mv);
-    k_sleep(K_MSEC(50));                     /* établissement de la cellule */
+    if (stop_cb && stop_cb()) {
+        lp_teardown();
+        return MEAS_RUN_STOPPED;
+    }
+
+    if (lp_set_potential_mv(p.vzero_mv, p.pot_mv) != 0) {
+        lp_teardown();
+        return -1;
+    }
+    if (ca_wait_or_stop(50u, stop_cb)) {     /* établissement de la cellule */
+        lp_teardown();
+        return MEAS_RUN_STOPPED;
+    }
 
     uint32_t n = p.duration_ms / p.interval_ms;
     if (n == 0) n = 1;
@@ -59,9 +87,24 @@ int CA_Run(float lfosc_hz, uint32_t rtia_ohm)
         int64_t target = t0 + (int64_t)k * p.interval_ms;
         int64_t now    = k_uptime_get();
         if (target > now) {
-            k_sleep(K_MSEC(target - now));
+            if (ca_wait_or_stop((uint32_t)(target - now), stop_cb)) {
+                s_peak_na = (int32_t)(peak * 1000.0f);
+                lp_teardown();
+                LOG_INF("CA interrompue par l'utilisateur apres %u point(s)",
+                        (unsigned)k);
+                return MEAS_RUN_STOPPED;
+            }
+        }
+        if (stop_cb && stop_cb()) {
+            s_peak_na = (int32_t)(peak * 1000.0f);
+            lp_teardown();
+            return MEAS_RUN_STOPPED;
         }
         float i_ua = lp_read_current_ua();
+        if (!isfinite(i_ua)) {
+            lp_teardown();
+            return -1;
+        }
         if (fabsf(i_ua) > peak) peak = fabsf(i_ua);
 
         uint32_t t_ms = (uint32_t)(k_uptime_get() - t0);

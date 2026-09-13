@@ -58,7 +58,9 @@ static ssize_t write_cmd(struct bt_conn *c, const struct bt_gatt_attr *a,
 
     case CMD_REQUEST_DATA:
         LOG_INF("CMD: REQUEST_DATA");
-        k_sem_give(&data_request_sem);
+        if (!measurement_request_submit()) {
+            LOG_WRN("REQUEST_DATA ignore : mesure deja en attente ou en cours");
+        }
         break;
 
     case CMD_ADD_DOCTOR:
